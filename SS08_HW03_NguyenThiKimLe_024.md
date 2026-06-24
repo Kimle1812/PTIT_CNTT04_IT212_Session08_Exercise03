@@ -30,60 +30,84 @@ Prompt:
 
 ### **Mã nguồn Java LedgerBalanceCalculator đã tối ưu hoàn chỉnh**
 
-java
-
 import lombok.extern.slf4j.Slf4j;
-
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 @Slf4j
-
+@Service
 public class LedgerBalanceCalculator {
 
-    @Transactional(readOnly \= true)
+   @Transactional(readOnly = true)
+   public double calculateTotalBalance(List<Account> accounts, String targetBranch, boolean activeOnly) {
 
-    public double calculateTotalBalance(List\<Account\> accounts, String branch, boolean activeOnly) {
+       if (accounts == null || targetBranch == null) {
+           log.info("Input không hợp lệ: accounts hoặc targetBranch = null");
+           return 0;
+       }
 
-        if (accounts \== null || branch \== null || branch.isBlank()) {
+       long processedCount = accounts.stream()
+               .filter(account -> account != null)
+               .filter(account -> targetBranch.equals(account.getBranch()))
+               .filter(account -> !activeOnly || "ACTIVE".equals(account.getStatus()))
+               .filter(account -> account.getBalance() > 0)
+               .count();
 
-            log.warn("Invalid input: accounts or branch is null/blank");
+       double totalBalance = accounts.stream()
+               .filter(account -> account != null)
+               .filter(account -> targetBranch.equals(account.getBranch()))
+               .filter(account -> !activeOnly || "ACTIVE".equals(account.getStatus()))
+               .filter(account -> account.getBalance() > 0)
+               .mapToDouble(Account::getBalance)
+               .sum();
 
-            return 0;
+       log.info("Số tài khoản hợp lệ: {}, Tổng số dư: {}", processedCount, totalBalance);
 
-        }
-
-        long count \= accounts.stream()
-
-                .filter(account \-\> account \!= null)
-
-                .filter(account \-\> branch.equals(account.getBranch()))
-
-                .filter(account \-\> \!activeOnly || "ACTIVE".equals(account.getStatus()))
-
-                .filter(account \-\> account.getBalance() \> 0\)
-
-                .count();
-
-        double totalBalance \= accounts.stream()
-
-                .filter(account \-\> account \!= null)
-
-                .filter(account \-\> branch.equals(account.getBranch()))
-
-                .filter(account \-\> \!activeOnly || "ACTIVE".equals(account.getStatus()))
-
-                .mapToDouble(Account::getBalance)
-
-                .filter(balance \-\> balance \> 0\)
-
-                .sum();
-
-        log.info("Processed {} accounts, total balance \= {}", count, totalBalance);
-
-        return totalBalance;
-
-    }
-
+       return totalBalance;
+   }
 }
+## **Giải thích thiết kế**
+### @Slf4j (Lombok)
+Tự động tạo logger:
+private static final Logger log = LoggerFactory.getLogger(...);
+→ Không cần viết thủ công
+### Logging chuẩn
+log.info("Số tài khoản hợp lệ: {}, Tổng số dư: {}", processedCount, totalBalance);
+→ Ưu điểm:
+Không nối chuỗi → tối ưu hiệu năng
+Format rõ ràng → dễ đọc log production
+
+### @Transactional(readOnly = true)
+Đảm bảo:
+Không update DB
+Tối ưu hiệu năng ORM
+An toàn dữ liệu
+
+Tối ưu hơn nữa (pro-level)
+Hiện tại bạn đang duyệt stream 2 lần:
+.count()
+.sum()
+→ Có thể tối ưu thành 1 lần duyệt duy nhất:
+double[] result = accounts.stream()
+       .filter(account -> account != null)
+       .filter(account -> targetBranch.equals(account.getBranch()))
+       .filter(account -> !activeOnly || "ACTIVE".equals(account.getStatus()))
+       .filter(account -> account.getBalance() > 0)
+       .collect(
+           () -> new double[2], // [0]=count, [1]=sum
+           (arr, acc) -> {
+               arr[0]++;
+               arr[1] += acc.getBalance();
+           },
+           (a, b) -> {
+               a[0] += b[0];
+               a[1] += b[1];
+           }
+       );
+
+log.info("Số tài khoản hợp lệ: {}, Tổng số dư: {}", (long) result[0], result[1]);
+return result[1];
+
+
